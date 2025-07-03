@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>任务进度模拟器</title>
+  <title>任务进度模拟器（带预计完成时间和累计图）</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body {
@@ -42,6 +42,10 @@
       cursor: pointer;
       flex: 1;
     }
+    button:disabled {
+      background-color: #a0cfff;
+      cursor: default;
+    }
     .control-group {
       display: flex;
       gap: 10px;
@@ -63,6 +67,7 @@
       border-left: 4px solid #409eff;
       background: #f2f8ff;
       font-size: 14px;
+      word-break: break-word;
     }
     .tool {
       border-left-color: #67c23a;
@@ -105,6 +110,13 @@
       justify-content: space-between;
       font-size: 14px;
     }
+    #estimatedTime {
+      text-align: center;
+      margin-top: 10px;
+      font-weight: 600;
+      color: #606266;
+      user-select: none;
+    }
   </style>
 </head>
 <body>
@@ -126,16 +138,17 @@
   <input type="range" id="speedRange" min="10" max="200" value="30" />
 
   <div class="control-group">
-    <button onclick="startSimulation()">▶️ 开始模拟</button>
-    <button id="togglePauseBtn" onclick="togglePause()">⏸️ 暂停</button>
+    <button id="startBtn" onclick="startSimulation()">▶️ 开始模拟</button>
+    <button id="togglePauseBtn" onclick="togglePause()" disabled>⏸️ 暂停</button>
     <button onclick="resetSimulation()">🔁 重置</button>
   </div>
 
   <div id="progressPercent">当前进度：0%</div>
   <div id="progressBar"><div id="progressFill"></div></div>
+  <div id="estimatedTime"></div>
 
-  <div id="output" class="log-container"></div>
-  <canvas id="progressChart"></canvas>
+  <div id="output" class="log-container" aria-live="polite"></div>
+  <canvas id="progressChart" aria-label="任务进度图" role="img"></canvas>
 
   <script>
     let chart;
@@ -145,23 +158,31 @@
       totalWork: 0,
       toolEfficiency: 0,
       toolCooldown: 0,
-      taskProgress: 0,  // 任务完成小时数，和时间hoursPassed分开
-      hoursPassed: 0,   // 时间小时数
+      taskProgress: 0,
+      hoursPassed: 0,
       nextToolAvailableIn: 0,
       hourLabels: [],
-      workPerHour: []
+      workPerHour: [],
+      cumulativeWork: []
     };
     let abortController;
 
-    document.getElementById("speedRange").addEventListener("input", function () {
-      document.getElementById("speedValue").textContent = this.value;
+    const startBtn = document.getElementById("startBtn");
+    const pauseBtn = document.getElementById("togglePauseBtn");
+    const speedRange = document.getElementById("speedRange");
+    const speedValueSpan = document.getElementById("speedValue");
+
+    speedRange.addEventListener("input", () => {
+      speedValueSpan.textContent = speedRange.value;
     });
 
     function resetSimulation() {
       simulationRunning = false;
       paused = false;
-      if (abortController) abortController.abort();
-      abortController = null;
+      if (abortController) {
+        abortController.abort();
+        abortController = null;
+      }
 
       simulationState = {
         totalWork: 0,
@@ -171,13 +192,17 @@
         hoursPassed: 0,
         nextToolAvailableIn: 0,
         hourLabels: [],
-        workPerHour: []
+        workPerHour: [],
+        cumulativeWork: []
       };
 
       document.getElementById("output").innerHTML = "";
       updateProgress(0);
-      document.getElementById("togglePauseBtn").textContent = "⏸️ 暂停";
-      updateChart([], []);
+      updateEstimatedTimeDisplay(0, 0);
+      updateChart([], [], []);
+      pauseBtn.textContent = "⏸️ 暂停";
+      pauseBtn.disabled = true;
+      startBtn.disabled = false;
     }
 
     async function startSimulation() {
@@ -195,10 +220,16 @@
       simulationState.nextToolAvailableIn = 0;
       simulationState.hourLabels = [];
       simulationState.workPerHour = [];
+      simulationState.cumulativeWork = [];
 
       document.getElementById("output").innerHTML = "";
-      updateChart([], []);
       updateProgress(0);
+      updateEstimatedTimeDisplay(0, simulationState.totalWork);
+      updateChart([], [], []);
+
+      pauseBtn.disabled = false;
+      startBtn.disabled = true;
+      pauseBtn.textContent = "⏸️ 暂停";
 
       runSimulation(signal);
     }
@@ -206,26 +237,26 @@
     function togglePause() {
       if (!simulationRunning) return;
       paused = !paused;
-      const btn = document.getElementById("togglePauseBtn");
-      btn.textContent = paused ? "▶️ 继续" : "⏸️ 暂停";
+      pauseBtn.textContent = paused ? "▶️ 继续" : "⏸️ 暂停";
       if (!paused) runSimulation(abortController.signal);
     }
 
     async function runSimulation(signal) {
       const output = document.getElementById("output");
-      const delay = parseInt(document.getElementById("speedRange").value);
+      const delay = parseInt(speedRange.value);
 
       while (true) {
         if (signal.aborted || paused || !simulationRunning) return;
-
         if (simulationState.taskProgress >= simulationState.totalWork) break;
 
         await new Promise((resolve) => setTimeout(resolve, delay));
 
+        if (signal.aborted || paused || !simulationRunning) return;
+
         const logItem = document.createElement("div");
         logItem.className = "log-entry";
 
-        const taskStartHour = simulationState.taskProgress + 1;  // 当前任务编号起点
+        const taskStartHour = simulationState.taskProgress + 1;
         let workThisHour = 1;
 
         if (simulationState.nextToolAvailableIn === 0) {
@@ -241,8 +272,10 @@
 
         simulationState.taskProgress += workThisHour;
         simulationState.hoursPassed++;
+
         simulationState.hourLabels.push(`第${simulationState.hoursPassed}小时`);
         simulationState.workPerHour.push(workThisHour);
+        simulationState.cumulativeWork.push(simulationState.taskProgress);
 
         output.appendChild(logItem);
         output.scrollTop = output.scrollHeight;
@@ -251,30 +284,45 @@
           100,
           Math.floor((simulationState.taskProgress / simulationState.totalWork) * 100)
         );
-        updateProgress(percent);
-        updateChart(simulationState.hourLabels, simulationState.workPerHour);
+
+        if (simulationRunning) {
+          updateProgress(percent);
+          updateEstimatedTimeDisplay(simulationState.taskProgress, simulationState.totalWork);
+          updateChart(simulationState.hourLabels, simulationState.workPerHour, simulationState.cumulativeWork);
+        }
       }
 
-      const summary = document.createElement("div");
-      summary.className = "summary";
-      summary.textContent = `✅ 任务完成，总耗时：${simulationState.hoursPassed} 小时`;
-      output.appendChild(summary);
+      if (!signal.aborted) {
+        const summary = document.createElement("div");
+        summary.className = "summary";
+        summary.textContent = `✅ 任务完成，总耗时：${simulationState.hoursPassed} 小时`;
+        output.appendChild(summary);
+      }
 
       simulationRunning = false;
+      pauseBtn.disabled = true;
+      startBtn.disabled = false;
     }
 
     function updateProgress(percent) {
-      if (typeof percent !== "number" || isNaN(percent)) percent = 0;
+      if (typeof percent !== "number" || isNaN(percent) || percent < 0) percent = 0;
+      if (percent > 100) percent = 100;
       document.getElementById("progressPercent").textContent = `当前进度：${percent}%`;
       document.getElementById("progressFill").style.width = percent + "%";
     }
 
-    function updateChart(labels, data) {
+    // 修改这个函数，清空预计完成时间文本，不显示任何内容
+    function updateEstimatedTimeDisplay(completed, total) {
+      const el = document.getElementById("estimatedTime");
+      el.textContent = "";
+    }
+
+    function updateChart(labels, hourlyData, cumulativeData) {
       if (chart) {
         chart.destroy();
         chart = null;
       }
-      if (!labels || !data || labels.length === 0 || data.length === 0) return;
+      if (!labels || !hourlyData || labels.length === 0 || hourlyData.length === 0) return;
 
       const ctx = document.getElementById("progressChart").getContext("2d");
       chart = new Chart(ctx, {
@@ -283,27 +331,60 @@
           labels: labels,
           datasets: [
             {
+              type: "bar",
               label: "每小时完成量",
-              data: data,
-              backgroundColor: data.map((val) => (val > 1 ? "#67c23a" : "#409eff")),
+              data: hourlyData,
+              backgroundColor: hourlyData.map((val) =>
+                val > 1 ? "#67c23a" : "#409eff"
+              ),
+              yAxisID: "y",
+            },
+            {
+              type: "line",
+              label: "累计完成量",
+              data: cumulativeData,
+              borderColor: "#f56c6c",
+              fill: false,
+              tension: 0.1,
+              yAxisID: "y1",
+              pointRadius: 2,
+              borderWidth: 2,
             },
           ],
         },
         options: {
           responsive: true,
           animation: false,
+          interaction: {
+            intersect: false,
+            mode: "index",
+          },
           plugins: {
             legend: {
-              display: false,
+              display: true,
             },
           },
           scales: {
             y: {
               beginAtZero: true,
+              position: "left",
               title: {
                 display: true,
-                text: "任务小时数",
+                text: "小时数",
               },
+              max: Math.max(...hourlyData) + 1,
+            },
+            y1: {
+              beginAtZero: true,
+              position: "right",
+              grid: {
+                drawOnChartArea: false,
+              },
+              title: {
+                display: true,
+                text: "累计小时数",
+              },
+              max: cumulativeData.length ? cumulativeData[cumulativeData.length - 1] + 5 : 10,
             },
             x: {
               title: {
