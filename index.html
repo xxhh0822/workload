@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="zh">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>任务进度模拟器</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -13,7 +14,7 @@
       box-sizing: border-box;
     }
     h1 {
-      font-size: 20px;
+      font-size: 22px;
       color: #333;
     }
     label {
@@ -21,7 +22,8 @@
       margin: 10px 0 5px;
       font-size: 16px;
     }
-    input {
+    input[type="number"],
+    input[type="range"] {
       padding: 8px;
       font-size: 16px;
       width: 100%;
@@ -33,70 +35,283 @@
     button {
       padding: 10px 16px;
       font-size: 16px;
-      background-color: #409EFF;
+      background-color: #409eff;
       color: white;
       border: none;
       border-radius: 4px;
       cursor: pointer;
-      width: 100%;
+      flex: 1;
     }
-    pre {
-      background: #eee;
-      padding: 10px;
-      border-radius: 6px;
-      white-space: pre-wrap;
+    .control-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .log-container {
       margin-top: 20px;
       max-height: 50vh;
       overflow-y: auto;
+      border-radius: 6px;
+      background: #fff;
+      border: 1px solid #ddd;
+      padding: 10px;
+    }
+    .log-entry {
+      padding: 8px;
+      margin-bottom: 6px;
+      border-left: 4px solid #409eff;
+      background: #f2f8ff;
+      font-size: 14px;
+    }
+    .tool {
+      border-left-color: #67c23a;
+      background: #f0fdf4;
+    }
+    .summary {
+      font-weight: bold;
+      font-size: 16px;
+      color: #303133;
+      text-align: center;
+      margin-top: 20px;
+    }
+    canvas {
+      margin-top: 30px;
+      max-width: 100%;
+    }
+    #progressPercent {
+      margin-top: 10px;
+      font-weight: bold;
+      text-align: center;
+      font-size: 16px;
+    }
+    #progressBar {
+      width: 100%;
+      height: 10px;
+      background-color: #e0e0e0;
+      border-radius: 5px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    #progressFill {
+      height: 100%;
+      width: 0%;
+      background-color: #409eff;
+      transition: width 0.2s;
+    }
+    .slider-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       font-size: 14px;
     }
   </style>
 </head>
 <body>
   <h1>工作量模拟器</h1>
+
   <label for="totalWorkInput">总任务量（小时）：</label>
-  <input type="number" id="totalWorkInput" value="360" min="1">
+  <input type="number" id="totalWorkInput" value="360" min="1" inputmode="numeric" pattern="[0-9]*" />
 
   <label for="toolEfficiencyInput">工具效率（每次完成任务小时数）：</label>
-  <input type="number" id="toolEfficiencyInput" value="10" min="1">
+  <input type="number" id="toolEfficiencyInput" value="10" min="1" inputmode="numeric" pattern="[0-9]*" />
 
   <label for="toolCooldownInput">工具冷却时间（小时）：</label>
-  <input type="number" id="toolCooldownInput" value="23" min="0">
+  <input type="number" id="toolCooldownInput" value="23" min="0" inputmode="numeric" pattern="[0-9]*" />
 
-  <button onclick="simulateWork()">开始模拟</button>
+  <div class="slider-label">
+    <label for="speedRange">动画速度（越小越快）：</label>
+    <span id="speedValue">30</span> ms
+  </div>
+  <input type="range" id="speedRange" min="10" max="200" value="30" />
 
-  <pre id="output"></pre>
+  <div class="control-group">
+    <button onclick="startSimulation()">▶️ 开始模拟</button>
+    <button id="togglePauseBtn" onclick="togglePause()">⏸️ 暂停</button>
+    <button onclick="resetSimulation()">🔁 重置</button>
+  </div>
+
+  <div id="progressPercent">当前进度：0%</div>
+  <div id="progressBar"><div id="progressFill"></div></div>
+
+  <div id="output" class="log-container"></div>
+  <canvas id="progressChart"></canvas>
 
   <script>
-    function simulateWork() {
-      const totalWork = parseInt(document.getElementById("totalWorkInput").value, 10);
-      const toolEfficiency = parseInt(document.getElementById("toolEfficiencyInput").value, 10);
-      const toolCooldown = parseInt(document.getElementById("toolCooldownInput").value, 10);
+    let chart;
+    let simulationRunning = false;
+    let paused = false;
+    let simulationState = {
+      totalWork: 0,
+      toolEfficiency: 0,
+      toolCooldown: 0,
+      currentWork: 0,
+      hoursPassed: 0,
+      nextToolAvailableIn: 0,
+      hourLabels: [],
+      workPerHour: []
+    };
+    let abortController;
 
-      let currentWork = 0;
-      let hoursPassed = 0;
-      let nextToolAvailableIn = 0;
-      const logs = [];
+    document.getElementById("speedRange").addEventListener("input", function () {
+      document.getElementById("speedValue").textContent = this.value;
+    });
 
-      while (currentWork < totalWork) {
+    function resetSimulation() {
+      simulationRunning = false;
+      paused = false;
+      if (abortController) abortController.abort();
+      abortController = null;
+
+      simulationState = {
+        totalWork: 0,
+        toolEfficiency: 0,
+        toolCooldown: 0,
+        currentWork: 0,
+        hoursPassed: 0,
+        nextToolAvailableIn: 0,
+        hourLabels: [],
+        workPerHour: []
+      };
+
+      document.getElementById("output").innerHTML = "";
+      updateProgress(0);
+      document.getElementById("togglePauseBtn").textContent = "⏸️ 暂停";
+      updateChart([], []);
+    }
+
+    async function startSimulation() {
+      if (simulationRunning) return;
+      simulationRunning = true;
+      paused = false;
+      abortController = new AbortController();
+      const signal = abortController.signal;
+
+      simulationState.totalWork = parseInt(document.getElementById("totalWorkInput").value, 10);
+      simulationState.toolEfficiency = parseInt(document.getElementById("toolEfficiencyInput").value, 10);
+      simulationState.toolCooldown = parseInt(document.getElementById("toolCooldownInput").value, 10);
+      simulationState.currentWork = 0;
+      simulationState.hoursPassed = 0;
+      simulationState.nextToolAvailableIn = 0;
+      simulationState.hourLabels = [];
+      simulationState.workPerHour = [];
+
+      document.getElementById("output").innerHTML = "";
+      updateChart([], []);
+      updateProgress(0);
+
+      runSimulation(signal);
+    }
+
+    function togglePause() {
+      if (!simulationRunning) return;
+      paused = !paused;
+      const btn = document.getElementById("togglePauseBtn");
+      btn.textContent = paused ? "▶️ 继续" : "⏸️ 暂停";
+      if (!paused) runSimulation(abortController.signal);
+    }
+
+    async function runSimulation(signal) {
+      const output = document.getElementById("output");
+      const delay = parseInt(document.getElementById("speedRange").value);
+
+      while (true) {
+        if (signal.aborted || paused || !simulationRunning) return;
+
+        if (simulationState.currentWork >= simulationState.totalWork) break;
+
+        await new Promise((resolve) => setTimeout(resolve, delay));
+
         let workThisHour = 1;
-        const hourLabel = hoursPassed + 1;
+        const hourLabel = simulationState.hoursPassed + 1;
+        const logItem = document.createElement("div");
+        logItem.className = "log-entry";
 
-        if (nextToolAvailableIn === 0) {
-          workThisHour = toolEfficiency;
-          nextToolAvailableIn = toolCooldown;
-          logs.push(`第 ${hourLabel} 小时：✅ 使用工具，完成 ${toolEfficiency} 小时任务（含人工）`);
+        if (simulationState.nextToolAvailableIn === 0) {
+          workThisHour = simulationState.toolEfficiency;
+          simulationState.nextToolAvailableIn = simulationState.toolCooldown;
+          logItem.textContent = `🛠️ 第 ${hourLabel} 小时：使用工具，完成 ${simulationState.toolEfficiency} 小时任务（含人工）`;
+          logItem.classList.add("tool");
         } else {
-          logs.push(`第 ${hourLabel} 小时：人工完成 1 小时任务`);
-          nextToolAvailableIn--;
+          logItem.textContent = `👷 第 ${hourLabel} 小时：人工完成 1 小时任务`;
+          simulationState.nextToolAvailableIn--;
         }
 
-        currentWork += workThisHour;
-        hoursPassed++;
+        simulationState.currentWork += workThisHour;
+        simulationState.hoursPassed++;
+        simulationState.hourLabels.push(`第${hourLabel}小时`);
+        simulationState.workPerHour.push(workThisHour);
+
+        output.appendChild(logItem);
+        output.scrollTop = output.scrollHeight;
+
+        const percent = Math.min(
+          100,
+          Math.floor((simulationState.currentWork / simulationState.totalWork) * 100)
+        );
+        updateProgress(percent);
+        updateChart(simulationState.hourLabels, simulationState.workPerHour);
       }
 
-      logs.push(`\n任务完成，总耗时：${hoursPassed} 小时`);
-      document.getElementById("output").textContent = logs.join("\n");
+      const summary = document.createElement("div");
+      summary.className = "summary";
+      summary.textContent = `✅ 任务完成，总耗时：${simulationState.hoursPassed} 小时`;
+      output.appendChild(summary);
+
+      simulationRunning = false;
+    }
+
+    function updateProgress(percent) {
+      if (typeof percent !== "number" || isNaN(percent)) percent = 0;
+      document.getElementById("progressPercent").textContent = `当前进度：${percent}%`;
+      document.getElementById("progressFill").style.width = percent + "%";
+    }
+
+    function updateChart(labels, data) {
+      if (chart) {
+        chart.destroy();
+        chart = null;
+      }
+      if (!labels || !data || labels.length === 0 || data.length === 0) return;
+
+      const ctx = document.getElementById("progressChart").getContext("2d");
+      chart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: "每小时完成量",
+              data: data,
+              backgroundColor: data.map((val) => (val > 1 ? "#67c23a" : "#409eff")),
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          animation: false,
+          plugins: {
+            legend: {
+              display: false,
+            },
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: "任务小时数",
+              },
+            },
+            x: {
+              title: {
+                display: true,
+                text: "时间（小时）",
+              },
+            },
+          },
+        },
+      });
     }
   </script>
 </body>
