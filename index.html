@@ -2,32 +2,43 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>任务进度模拟器</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      padding: 20px;
+      padding: 16px;
       background: #f9f9f9;
-      max-width: 700px;
-      margin: auto;
+      max-width: 100%;
+      box-sizing: border-box;
     }
     h1 {
+      font-size: 20px;
       color: #333;
     }
     label {
       display: block;
       margin: 10px 0 5px;
+      font-size: 16px;
     }
     input {
-      padding: 5px;
+      padding: 8px;
+      font-size: 16px;
       width: 100%;
       box-sizing: border-box;
       margin-bottom: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
     }
     button {
-      padding: 10px 20px;
+      padding: 10px 16px;
       font-size: 16px;
+      background-color: #409EFF;
+      color: white;
+      border: none;
+      border-radius: 4px;
       cursor: pointer;
+      width: 100%;
     }
     pre {
       background: #eee;
@@ -35,8 +46,9 @@
       border-radius: 6px;
       white-space: pre-wrap;
       margin-top: 20px;
-      max-height: 400px;
+      max-height: 50vh;
       overflow-y: auto;
+      font-size: 14px;
     }
   </style>
 </head>
