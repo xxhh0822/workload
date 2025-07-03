@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>任务进度模拟器</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f9f9f9;
+      max-width: 700px;
+      margin: auto;
+    }
+    h1 {
+      color: #333;
+    }
+    label {
+      display: block;
+      margin: 10px 0 5px;
+    }
+    input {
+      padding: 5px;
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    pre {
+      background: #eee;
+      padding: 10px;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      margin-top: 20px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>工作量模拟器</h1>
+  <label for="totalWorkInput">总任务量（小时）：</label>
+  <input type="number" id="totalWorkInput" value="360" min="1">
+
+  <label for="toolEfficiencyInput">工具效率（每次完成任务小时数）：</label>
+  <input type="number" id="toolEfficiencyInput" value="10" min="1">
+
+  <label for="toolCooldownInput">工具冷却时间（小时）：</label>
+  <input type="number" id="toolCooldownInput" value="23" min="0">
+
+  <button onclick="simulateWork()">开始模拟</button>
+
+  <pre id="output"></pre>
+
+  <script>
+    function simulateWork() {
+      const totalWork = parseInt(document.getElementById("totalWorkInput").value, 10);
+      const toolEfficiency = parseInt(document.getElementById("toolEfficiencyInput").value, 10);
+      const toolCooldown = parseInt(document.getElementById("toolCooldownInput").value, 10);
+
+      let currentWork = 0;
+      let hoursPassed = 0;
+      let nextToolAvailableIn = 0;
+      const logs = [];
+
+      while (currentWork < totalWork) {
+        let workThisHour = 1;
+        const hourLabel = hoursPassed + 1;
+
+        if (nextToolAvailableIn === 0) {
+          workThisHour = toolEfficiency;
+          nextToolAvailableIn = toolCooldown;
+          logs.push(`第 ${hourLabel} 小时：✅ 使用工具，完成 ${toolEfficiency} 小时任务（含人工）`);
+        } else {
+          logs.push(`第 ${hourLabel} 小时：人工完成 1 小时任务`);
+          nextToolAvailableIn--;
+        }
+
+        currentWork += workThisHour;
+        hoursPassed++;
+      }
+
+      logs.push(`\n任务完成，总耗时：${hoursPassed} 小时`);
+      document.getElementById("output").textContent = logs.join("\n");
+    }
+  </script>
+</body>
+</html>
